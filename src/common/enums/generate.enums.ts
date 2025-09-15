@@ -53,12 +53,17 @@ export enum BudgetRange {
 export enum RefinementAspect {
   BUSINESS_MODEL = 'business-model',
   TARGET_AUDIENCE = 'target-audience',
-  MARKET_ANALYSIS = 'market-analysis',
-  REVENUE_STREAMS = 'revenue-streams',
-  COMPETITIVE_ANALYSIS = 'competitive-analysis',
-  TECHNICAL_REQUIREMENTS = 'technical-requirements',
   MARKETING_STRATEGY = 'marketing-strategy',
+  FINANCIAL_PLANNING = 'financial-planning',
   RISK_ASSESSMENT = 'risk-assessment',
+  TECHNICAL_REQUIREMENTS = 'technical-requirements',
+  LEGAL_COMPLIANCE = 'legal-compliance',
+  COMPETITIVE_ANALYSIS = 'competitive-analysis',
+  REVENUE_STREAMS = 'revenue-streams',
+  OPERATIONAL_PLANNING = 'operational-planning',
+  GROWTH_STRATEGY = 'growth-strategy',
+  PARTNERSHIPS = 'partnerships',
+  MARKET_ENTRY = 'market-entry',
 }
 
 export enum ShareDuration {
