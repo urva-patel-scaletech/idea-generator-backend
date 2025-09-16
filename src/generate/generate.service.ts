@@ -12,6 +12,7 @@ import { User } from '../entities/user.entity';
 import { Message } from '../entities/message.entity';
 import { MessageSender } from '../common/enums';
 import { GeminiService } from '../gemini/gemini.service';
+import { TrendingService } from '../trending/trending.service';
 import {
   GenerateDto,
   RefineDto,
@@ -32,6 +33,7 @@ export class GenerateService {
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
     private geminiService: GeminiService,
+    private trendingService: TrendingService,
   ) {}
 
   async generateContent(userId: string, generateDto: GenerateDto) {
@@ -284,34 +286,9 @@ export class GenerateService {
     };
   }
 
-  async getTrendingIdeas(appType?: string) {
-    console.log(appType);
-    // Simple trending algorithm based on recent activity
-    const queryBuilder = this.threadRepository
-      .createQueryBuilder('thread')
-      .leftJoinAndSelect('thread.assistant', 'assistant')
-      .where('thread.metadata IS NOT NULL');
-
-    if (appType) {
-      queryBuilder.andWhere("thread.metadata->>'appType' = :appType", {
-        appType,
-      });
-    }
-
-    const threads = await queryBuilder
-      .orderBy('thread.updatedAt', 'DESC')
-      .limit(10)
-      .getMany();
-
-    return threads.map((thread) => ({
-      id: thread.id,
-      title: thread.title,
-      appType: thread.assistant.appType,
-      generatedContent: thread.metadata?.generatedContent,
-      userActions: thread.metadata?.userActions,
-      score: this.calculateTrendingScore(thread.metadata),
-      updatedAt: thread.updatedAt,
-    }));
+  async getTrendingIdeas() {
+    // Use new AI-generated trending ideas
+    return this.trendingService.getTrendingIdeas();
   }
 
   /**
@@ -340,16 +317,12 @@ export class GenerateService {
     const defaultParams = {
       count: assistant.appSettings?.defaultCount || 6,
       industry: assistant.appSettings?.defaultIndustry || 'general',
-      complexity: assistant.appSettings?.defaultComplexity || 'simple',
       format: assistant.appSettings?.defaultFormat || 'cards',
       ...assistant.appSettings?.defaultOptions,
     };
 
-    // Try to infer parameters from user message using assistant's inference prompt
-    const inferredParams = await this.inferParamsFromMessage(
-      userMessage,
-      assistant,
-    );
+    // Skip parameter inference - use only explicit overrides
+    const inferredParams = {};
 
     // Get user context (could include past preferences, industry, etc.)
     const userContext = await this.getUserContext(userId);
@@ -371,41 +344,6 @@ export class GenerateService {
     console.log('=== END DEBUG ===');
 
     return resolvedParams;
-  }
-
-  /**
-   * AI-powered parameter inference from user message using database prompt
-   */
-  private async inferParamsFromMessage(
-    message: string,
-    assistant?: any,
-  ): Promise<any> {
-    return await this.geminiService.extractParameters(message, assistant);
-  }
-
-  /**
-   * Fallback basic parameter inference
-   */
-  private basicParameterInference(message: string): any {
-    const lowerMessage = message.toLowerCase();
-    const params: any = {};
-
-    // Basic industry detection
-    const industries = {
-      tech: ['tech', 'software', 'app', 'digital', 'ai', 'startup'],
-      food: ['food', 'restaurant', 'cooking', 'recipe', 'kitchen'],
-      health: ['health', 'fitness', 'medical', 'wellness', 'doctor'],
-      education: ['education', 'learning', 'school', 'course', 'training'],
-    };
-
-    for (const [industry, keywords] of Object.entries(industries)) {
-      if (keywords.some((keyword) => lowerMessage.includes(keyword))) {
-        params.industry = industry;
-        break;
-      }
-    }
-
-    return params;
   }
 
   /**
@@ -439,23 +377,7 @@ export class GenerateService {
       : title;
   }
 
-  private calculateTrendingScore(metadata: any): number {
-    if (!metadata) return 0;
 
-    const savedCount = metadata.userActions?.saved?.length || 0;
-    const sharedCount = metadata.userActions?.shared?.length || 0;
-    const refinedCount = metadata.refinementHistory?.length || 0;
-
-    // Simple scoring algorithm
-    return savedCount * 3 + sharedCount * 5 + refinedCount * 2;
-  }
-
-  /**
-   * Generate a random score between 7.0 and 9.5 for cards that don't have scores
-   */
-  private generateRandomScore(): number {
-    return Math.round((Math.random() * 2.5 + 7.0) * 10) / 10;
-  }
 
   /**
    * Assign unique IDs to each card in the generated content
@@ -471,11 +393,10 @@ export class GenerateService {
         return this.assignCardIds(parsed);
       } catch (error) {
         console.error('Failed to parse JSON content:', error);
-        // If parsing fails, wrap the string content in an object with ID and score
+        // If parsing fails, wrap the string content in an object with ID
         return {
           id: uuidv4(),
           content: content,
-          score: this.generateRandomScore(),
         };
       }
     }
@@ -484,13 +405,11 @@ export class GenerateService {
       return content.map((card) => ({
         ...card,
         id: uuidv4(),
-        score: card.score || this.generateRandomScore(),
       }));
     } else if (content && typeof content === 'object') {
       return {
         ...content,
         id: uuidv4(),
-        score: content.score || this.generateRandomScore(),
       };
     }
     return content;

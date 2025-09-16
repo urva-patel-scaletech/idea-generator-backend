@@ -4,7 +4,6 @@ import {
   Get,
   Body,
   Param,
-  Query,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -126,8 +125,8 @@ export class GenerateController {
     status: 200,
     description: 'Trending ideas retrieved successfully',
   })
-  async getTrending(@Query('appType') appType?: string) {
-    return this.generateService.getTrendingIdeas(appType);
+  async getTrending() {
+    return this.generateService.getTrendingIdeas();
   }
 
   @Post(':threadId/chat')

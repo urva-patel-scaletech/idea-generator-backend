@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -23,54 +23,6 @@ export class GeminiService {
     }
 
     this.client = new GoogleGenAI({ apiKey });
-  }
-
-  async extractParameters(message: string, assistant?: any): Promise<any> {
-    if (!this.client) {
-      throw new Error(
-        'Gemini service not initialized. Please check your API key.',
-      );
-    }
-
-    try {
-      // Get inference prompt from assistant configuration
-      const inferencePrompt =
-        assistant?.promptConfig?.parameterInferencePrompt ||
-        'Extract key parameters from this message. Only extract parameters that are explicitly mentioned. Return JSON with industry, count, complexity, tone, target_audience, urgency, budget_range fields. If not mentioned, omit the field.';
-
-      const promptWithMessage = inferencePrompt.replace('{{message}}', message);
-
-      const response = await this.client.models.generateContent({
-        model: 'gemini-1.5-flash',
-        contents: promptWithMessage,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              industry: { type: Type.STRING },
-              count: { type: Type.NUMBER },
-              complexity: { type: Type.STRING },
-              tone: { type: Type.STRING },
-              target_audience: { type: Type.STRING },
-              urgency: { type: Type.STRING },
-              budget_range: { type: Type.STRING },
-            },
-          },
-        },
-      });
-
-      if (!response.text) {
-        throw new Error('No response text from Gemini');
-      }
-
-      const extractedParams = JSON.parse(response.text);
-      this.logger.log('Gemini parameter extraction successful');
-      return extractedParams;
-    } catch (error) {
-      this.logger.error('Error extracting parameters with Gemini:', error);
-      throw new Error('Failed to extract parameters with Gemini');
-    }
   }
 
   async generateSummary(messages: string[]): Promise<string> {
@@ -117,7 +69,7 @@ ${conversationText}`,
     try {
       // Convert ChatMessage format to Gemini format
       const geminiMessages = this.convertToGeminiFormat(messages);
-      
+
       const response = await this.client.models.generateContent({
         model,
         contents: geminiMessages,
@@ -212,7 +164,14 @@ ${conversationText}`,
       ];
 
       const response = await this.generateChatCompletion(messages);
-      return this.parseStructuredResponse(response, { type: 'object' });
+
+      // For refinement responses, return the raw structured text instead of trying to parse as JSON
+      // since our refinement templates produce markdown-formatted structured text, not JSON
+      return {
+        content: response,
+        type: 'structured_text',
+        aspect: refinementAspect,
+      };
     } catch (error) {
       this.logger.error('Error refining content:', error);
       throw new Error('Failed to refine content');
@@ -286,7 +245,7 @@ Write responses that:
   private convertToGeminiFormat(messages: ChatMessage[]): string {
     // Convert ChatMessage array to a single prompt string for Gemini
     let prompt = '';
-    
+
     messages.forEach((message) => {
       if (message.role === 'system') {
         prompt += `System: ${message.content}\n\n`;
@@ -296,7 +255,7 @@ Write responses that:
         prompt += `Assistant: ${message.content}\n\n`;
       }
     });
-    
+
     return prompt.trim();
   }
 
@@ -406,24 +365,17 @@ Write responses that:
       );
     }
 
-    let systemPrompt: string = promptConfig.refinementTemplates[
+    // Use the exact structured refinement template from the database
+    const systemPrompt: string = promptConfig.refinementTemplates[
       refinementAspect
     ] as string;
 
-    // Add business boundary to refinement prompts
-    const businessBoundary = `\n\n🚨 BUSINESS FOCUS BOUNDARY:\n- ONLY provide business, entrepreneurship, startup, or commercial-related insights\n- Focus on: business strategy, marketing, finance, operations, management, entrepreneurship, startups, commerce\n- If the content is not business-related, redirect to business applications or implications\n`;
-    systemPrompt += businessBoundary;
+    // Create user prompt that provides the business idea context
+    const userPrompt = `Business Idea: "${originalContent.title || 'Untitled'}"
 
-    const userPrompt = `Provide 3-4 SHORT, actionable business insights about ${refinementAspect} for:
+Description: ${originalContent.description || originalContent.content || 'No description provided'}
 
-"${originalContent.title || 'Untitled'}"
-${originalContent.description || originalContent.content || ''}
-
-Format: 
-• Key insight 1 (1 sentence)
-• Key insight 2 (1 sentence) 
-• Key insight 3 (1 sentence)
-• Key insight 4 (1 sentence)`;
+Please analyze this business idea and provide your response following the EXACT format specified in the system prompt above. Use the structured format with emoji headers and bullet points as defined.`;
 
     return { systemPrompt, userPrompt };
   }

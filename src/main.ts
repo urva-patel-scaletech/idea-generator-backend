@@ -8,10 +8,10 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Enable CORS for frontend integration
+  // Enable CORS for frontend integration - Allow all origins
   app.enableCors({
-    origin: [process.env.FRONTEND_URL || 'http://localhost:3000'],
-    credentials: true,
+    origin: true, // Allow all origins
+    // credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: 'Content-Type, Authorization, Accept, X-Requested-With',
   });
