@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TrendingController } from './trending.controller';
 import { TrendingService } from './trending.service';
-import { GeminiModule } from '../gemini/gemini.module';
+import { OpenAiModule } from '../openai/openai.module';
 
 @Module({
-  imports: [GeminiModule],
+  imports: [OpenAiModule],
   controllers: [TrendingController],
   providers: [TrendingService],
   exports: [TrendingService],

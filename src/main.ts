@@ -1,11 +1,12 @@
 import { NestFactory, Reflector } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
 
   // Enable CORS for frontend integration - Allow all origins
@@ -55,7 +56,10 @@ async function bootstrap() {
   const port = process.env.PORT || 3000;
   await app.listen(port);
 
-  console.log(`🚀 AI Factory Backend running on port ${port}`);
-  console.log(`📚 API Documentation: http://localhost:${port}/api`);
+  logger.log(`🚀 AI Factory Backend running on port ${port}`);
+  logger.log(`📚 API Documentation: http://localhost:${port}/api`);
 }
-bootstrap();
+bootstrap().catch((error) => {
+  console.error('Failed to start application:', error);
+  process.exit(1);
+});

@@ -233,6 +233,47 @@ export class GenerateController {
     return this.generateService.getChatHistoryByCard(userId, threadId, cardId);
   }
 
+  @Get('history')
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get user history of all generated ideas' })
+  @ApiResponse({
+    status: 200,
+    description: 'User history retrieved successfully',
+    schema: {
+      example: {
+        success: true,
+        data: {
+          totalThreads: 5,
+          totalIdeas: 25,
+          history: [
+            {
+              threadId: 'uuid',
+              title: 'Business Ideas Session',
+              appType: 'idea-generator',
+              createdAt: '2025-09-18T10:30:00Z',
+              updatedAt: '2025-09-18T10:35:00Z',
+              generatedIdeas: [
+                {
+                  id: 'idea-1',
+                  title: 'Smart Testing Platform',
+                  description: 'AI-powered testing insights',
+                  score: 8.5,
+                },
+              ],
+              refinements: [],
+              totalIdeas: 5,
+              hasRefinements: false,
+            },
+          ],
+        },
+      },
+    },
+  })
+  async getUserHistory(@Request() req: any) {
+    const userId = await this.getUserId(req);
+    return this.generateService.getUserHistory(userId);
+  }
+
   @Get(':threadId')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Get thread details' })

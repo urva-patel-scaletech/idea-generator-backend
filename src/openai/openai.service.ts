@@ -12,12 +12,14 @@ export interface ChatMessage {
 export class OpenAiService {
   private readonly logger = new Logger(OpenAiService.name);
   private readonly openai: OpenAI;
+  private readonly model: string;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly geminiService: GeminiService,
   ) {
     const apiKey = this.configService.get<string>('OPENAI_API_KEY');
+    this.model = this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
 
     if (!apiKey) {
       this.logger.warn(
@@ -29,11 +31,12 @@ export class OpenAiService {
     this.openai = new OpenAI({
       apiKey,
     });
+    this.logger.log(`Initialized OpenAI service with model: ${this.model}`);
   }
 
   async generateChatCompletion(
     messages: ChatMessage[],
-    model: string = 'gpt-4o-mini',
+    model?: string,
   ): Promise<string> {
     if (!this.openai) {
       throw new Error(
@@ -41,9 +44,12 @@ export class OpenAiService {
       );
     }
 
+    // Use configured model or fallback to default
+    const modelToUse = model || this.model;
+
     try {
       const completion = await this.openai.chat.completions.create({
-        model,
+        model: modelToUse,
         messages,
         temperature: 0.7,
         max_tokens: 2000,
@@ -55,15 +61,40 @@ export class OpenAiService {
         throw new Error('No response generated from OpenAI');
       }
 
+      this.logger.log(`OpenAI chat completion successful with ${modelToUse}`);
       return response.trim();
     } catch (error) {
-      this.logger.error('Error generating chat completion:', error);
+      this.logger.error(`Error with ${modelToUse}:`, error);
       throw new Error('Failed to generate AI response');
     }
   }
 
   async generateSummary(messages: string[]): Promise<string> {
-    return await this.geminiService.generateSummary(messages);
+    if (!this.openai) {
+      throw new Error(
+        'OpenAI service not initialized. Please check your API key.',
+      );
+    }
+
+    const conversationText = messages.join('\n\n');
+    const prompt = `You are a helpful assistant that creates concise summaries of conversations. Summarize the key points and outcomes in 2-3 sentences.
+
+Please summarize this conversation:
+
+${conversationText}`;
+
+    const chatMessages: ChatMessage[] = [
+      {
+        role: 'system',
+        content: 'You are a helpful assistant that creates concise summaries of conversations.',
+      },
+      {
+        role: 'user',
+        content: prompt,
+      },
+    ];
+
+    return this.generateChatCompletion(chatMessages);
   }
 
   async generateByAppType(
@@ -122,13 +153,6 @@ export class OpenAiService {
     const count = options.count || appSettings?.defaultCount || 5;
     const industry = options.industry || 'general';
 
-    console.log('=== PROMPT BUILDING DEBUG ===');
-    console.log('Count being used:', count);
-    console.log('Industry being used:', industry);
-    console.log('Options received:', options);
-    console.log('AppSettings received:', appSettings);
-    console.log('=== END PROMPT DEBUG ===');
-
     // Add business boundary enforcement to system prompt
     const businessBoundary = `\n\n🚨 BUSINESS FOCUS BOUNDARY:\n- ONLY provide business, entrepreneurship, startup, or commercial-related responses\n- If asked about non-business topics (personal advice, entertainment, general knowledge, etc.), politely redirect to business context\n- Example: "I focus on business solutions. Let me help you with business-related aspects of your question instead."\n- Stay within: business strategy, marketing, finance, operations, management, entrepreneurship, startups, commerce\n`;
 
@@ -164,34 +188,46 @@ export class OpenAiService {
       // Clean the response - remove markdown code blocks if present
       let cleanedResponse = response.trim();
 
-      // Remove ```json and ``` markers if present
-      if (cleanedResponse.startsWith('```json')) {
-        cleanedResponse = cleanedResponse
-          .replace(/^```json\s*/, '')
-          .replace(/\s*```$/, '');
-      } else if (cleanedResponse.startsWith('```')) {
-        cleanedResponse = cleanedResponse
-          .replace(/^```\s*/, '')
-          .replace(/\s*```$/, '');
+      // Handle ```json code blocks
+      const jsonMatch = cleanedResponse.match(
+        /```(?:json)?\s*([\s\S]*?)\s*```/,
+      );
+      if (jsonMatch) {
+        cleanedResponse = jsonMatch[1].trim();
       }
 
-      // Try to parse as JSON
-      const parsed = JSON.parse(cleanedResponse.trim());
+      // Remove any leading/trailing backticks or quotes
+      cleanedResponse = cleanedResponse.replace(/^[`"']+|[`"']+$/g, '');
 
-      // If it's an array, return it directly
-      if (Array.isArray(parsed)) {
+      // Extract JSON from mixed content if present
+      const jsonArrayMatch = cleanedResponse.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+      if (jsonArrayMatch) {
+        cleanedResponse = jsonArrayMatch[0];
+      }
+
+      try {
+        const parsed = JSON.parse(cleanedResponse.trim());
+
+        // If it's an array, return it directly
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+
+        // If it's an object, return it directly
+        if (typeof parsed === 'object' && parsed !== null) {
+          return parsed;
+        }
+
         return parsed;
+      } catch (parseError) {
+        this.logger.error('JSON parsing failed:', parseError);
+        this.logger.error('Raw response:', response);
+        this.logger.error('Cleaned response:', cleanedResponse);
+        throw new Error('Failed to parse AI response as JSON');
       }
-
-      // If it's an object, return it directly
-      if (typeof parsed === 'object' && parsed !== null) {
-        return parsed;
-      }
-
-      return parsed;
     } catch (error) {
-      console.error('Failed to parse JSON response:', error);
-      console.error('Raw response:', response);
+      this.logger.error('Failed to parse JSON response:', error);
+      this.logger.error('Raw response:', response);
 
       // If not JSON, return as structured object based on format
       if (outputFormat?.type === 'array') {
@@ -207,12 +243,6 @@ export class OpenAiService {
     promptConfig: any,
     options: any = {},
   ): Promise<any> {
-    console.log('=== REFINEMENT DEBUG ===');
-    console.log('Original Content:', originalContent);
-    console.log('Refinement Aspect:', refinementAspect);
-    console.log('Prompt Config:', promptConfig);
-    console.log('Options:', options);
-    console.log('=== END DEBUG ===');
     if (!this.openai) {
       throw new Error(
         'OpenAI service not initialized. Please check your API key.',
@@ -227,7 +257,6 @@ export class OpenAiService {
         options,
       );
 
-      console.log('Refinement Prompt:', refinementPrompt);
       const messages: ChatMessage[] = [
         {
           role: 'system',
@@ -240,7 +269,14 @@ export class OpenAiService {
       ];
 
       const response = await this.generateChatCompletion(messages);
-      return this.parseStructuredResponse(response, { type: 'object' });
+
+      // For refinement responses, return the raw structured text instead of trying to parse as JSON
+      // since our refinement templates produce markdown-formatted structured text, not JSON
+      return {
+        content: response,
+        type: 'structured_text',
+        aspect: refinementAspect,
+      };
     } catch (error) {
       this.logger.error('Error refining content:', error);
       throw new Error('Failed to refine content');
@@ -323,24 +359,17 @@ Write responses that:
       );
     }
 
-    let systemPrompt: string = promptConfig.refinementTemplates[
+    // Use the exact structured refinement template from the database
+    const systemPrompt: string = promptConfig.refinementTemplates[
       refinementAspect
     ] as string;
 
-    // Add business boundary to refinement prompts
-    const businessBoundary = `\n\n🚨 BUSINESS FOCUS BOUNDARY:\n- ONLY provide business, entrepreneurship, startup, or commercial-related insights\n- Focus on: business strategy, marketing, finance, operations, management, entrepreneurship, startups, commerce\n- If the content is not business-related, redirect to business applications or implications\n`;
-    systemPrompt += businessBoundary;
+    // Create user prompt that provides the business idea context
+    const userPrompt = `Business Idea: "${originalContent.title || 'Untitled'}"
 
-    const userPrompt = `Provide 3-4 SHORT, actionable business insights about ${refinementAspect} for:
+Description: ${originalContent.description || originalContent.content || 'No description provided'}
 
-"${originalContent.title || 'Untitled'}"
-${originalContent.description || originalContent.content || ''}
-
-Format: 
-• Key insight 1 (1 sentence)
-• Key insight 2 (1 sentence) 
-• Key insight 3 (1 sentence)
-• Key insight 4 (1 sentence)`;
+Please analyze this business idea and provide your response following the EXACT format specified in the system prompt above. Use the structured format with emoji headers and bullet points as defined.`;
 
     return { systemPrompt, userPrompt };
   }

@@ -11,9 +11,12 @@ export interface ChatMessage {
 export class GeminiService {
   private readonly logger = new Logger(GeminiService.name);
   private readonly client: GoogleGenAI;
+  private readonly model: string;
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+    this.model =
+      this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
 
     if (!apiKey) {
       this.logger.warn(
@@ -23,6 +26,7 @@ export class GeminiService {
     }
 
     this.client = new GoogleGenAI({ apiKey });
+    this.logger.log(`Initialized Gemini service with model: ${this.model}`);
   }
 
   async generateSummary(messages: string[]): Promise<string> {
@@ -32,33 +36,19 @@ export class GeminiService {
       );
     }
 
-    try {
-      const conversationText = messages.join('\n\n');
-
-      const response = await this.client.models.generateContent({
-        model: 'gemini-1.5-flash',
-        contents: `You are a helpful assistant that creates concise summaries of conversations. Summarize the key points and outcomes in 2-3 sentences.
+    const conversationText = messages.join('\n\n');
+    const prompt = `You are a helpful assistant that creates concise summaries of conversations. Summarize the key points and outcomes in 2-3 sentences.
 
 Please summarize this conversation:
 
-${conversationText}`,
-      });
+${conversationText}`;
 
-      if (!response.text) {
-        throw new Error('No response text from Gemini');
-      }
-
-      this.logger.log('Gemini summary generation successful');
-      return response.text.trim();
-    } catch (error) {
-      this.logger.error('Error generating summary with Gemini:', error);
-      throw new Error('Failed to generate summary with Gemini');
-    }
+    return this.generateContent(prompt);
   }
 
   async generateChatCompletion(
     messages: ChatMessage[],
-    model: string = 'gemini-1.5-flash',
+    model?: string,
   ): Promise<string> {
     if (!this.client) {
       throw new Error(
@@ -66,12 +56,15 @@ ${conversationText}`,
       );
     }
 
-    try {
-      // Convert ChatMessage format to Gemini format
-      const geminiMessages = this.convertToGeminiFormat(messages);
+    // Convert ChatMessage format to Gemini format
+    const geminiMessages = this.convertToGeminiFormat(messages);
 
+    // Use configured model or fallback to default
+    const modelToUse = model || this.model;
+
+    try {
       const response = await this.client.models.generateContent({
-        model,
+        model: modelToUse,
         contents: geminiMessages,
         config: {
           temperature: 0.7,
@@ -83,10 +76,10 @@ ${conversationText}`,
         throw new Error('No response generated from Gemini');
       }
 
-      this.logger.log('Gemini chat completion successful');
+      this.logger.log(`Gemini chat completion successful with ${modelToUse}`);
       return response.text.trim();
     } catch (error) {
-      this.logger.error('Error generating chat completion:', error);
+      this.logger.error(`Error with ${modelToUse}:`, error);
       throw new Error('Failed to generate AI response');
     }
   }
@@ -165,8 +158,7 @@ ${conversationText}`,
 
       const response = await this.generateChatCompletion(messages);
 
-      // For refinement responses, return the raw structured text instead of trying to parse as JSON
-      // since our refinement templates produce markdown-formatted structured text, not JSON
+      // Return raw structured text for refinement responses
       return {
         content: response,
         type: 'structured_text',
@@ -274,17 +266,12 @@ Write responses that:
     const count = options.count || appSettings?.defaultCount || 5;
     const industry = options.industry || 'general';
 
-    this.logger.log('=== PROMPT BUILDING DEBUG ===');
-    this.logger.log('Count being used:', count);
-    this.logger.log('Industry being used:', industry);
-    this.logger.log('Options received:', options);
-    this.logger.log('AppSettings received:', appSettings);
-    this.logger.log('=== END PROMPT DEBUG ===');
+    this.logger.debug('Prompt building completed');
 
     // Add business boundary enforcement to system prompt
     const businessBoundary = `\n\n🚨 BUSINESS FOCUS BOUNDARY:\n- ONLY provide business, entrepreneurship, startup, or commercial-related responses\n- If asked about non-business topics (personal advice, entertainment, general knowledge, etc.), politely redirect to business context\n- Example: "I focus on business solutions. Let me help you with business-related aspects of your question instead."\n- Stay within: business strategy, marketing, finance, operations, management, entrepreneurship, startups, commerce\n`;
 
-    // Replace all template variables in system prompt
+    // Replace template variables in system prompt
     let systemPrompt: string = promptConfig.systemTemplate as string;
     systemPrompt = systemPrompt.replace(/{{count}}/g, String(count));
     systemPrompt = systemPrompt.replace(/{{industry}}/g, String(industry));
@@ -296,7 +283,7 @@ Write responses that:
       systemPrompt = systemPrompt.replace(regex, String(options[key] || ''));
     });
 
-    // Replace all template variables in user prompt
+    // Replace template variables in user prompt
     let userPrompt: string = promptConfig.userTemplate as string;
     userPrompt = userPrompt.replace(/{{input}}/g, userInput);
     userPrompt = userPrompt.replace(/{{count}}/g, String(count));
@@ -313,10 +300,10 @@ Write responses that:
 
   private parseStructuredResponse(response: string, outputFormat: any): any {
     try {
-      // Clean the response - remove markdown code blocks if present
+      // Clean response by removing markdown code blocks
       let cleanedResponse = response.trim();
 
-      // Remove ```json and ``` markers if present
+      // Remove JSON code block markers
       if (cleanedResponse.startsWith('```json')) {
         cleanedResponse = cleanedResponse
           .replace(/^```json\s*/, '')
@@ -365,7 +352,7 @@ Write responses that:
       );
     }
 
-    // Use the exact structured refinement template from the database
+    // Use structured refinement template from database
     const systemPrompt: string = promptConfig.refinementTemplates[
       refinementAspect
     ] as string;
@@ -378,5 +365,40 @@ Description: ${originalContent.description || originalContent.content || 'No des
 Please analyze this business idea and provide your response following the EXACT format specified in the system prompt above. Use the structured format with emoji headers and bullet points as defined.`;
 
     return { systemPrompt, userPrompt };
+  }
+
+  /**
+   * Generate content using the configured model
+   */
+  private async generateContent(content: string): Promise<string> {
+    try {
+      this.logger.log(`Using model: ${this.model}`);
+
+      const response = await this.client.models.generateContent({
+        model: this.model,
+        contents: content,
+        config: {
+          temperature: 0.7,
+          maxOutputTokens: 2000,
+        },
+      });
+
+      if (!response.text) {
+        throw new Error('No response generated from Gemini');
+      }
+
+      this.logger.log(`Success with ${this.model}`);
+      return response.text.trim();
+    } catch (error) {
+      this.logger.error(`Error with ${this.model}:`, error);
+      throw new Error('Failed to generate content with Gemini');
+    }
+  }
+
+  /**
+   * Get current configured model
+   */
+  getCurrentModel(): string {
+    return this.model;
   }
 }

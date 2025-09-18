@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { GeminiService } from '../gemini/gemini.service';
+import { Injectable, Logger } from '@nestjs/common';
+import { OpenAiService } from '../openai/openai.service';
 
 export interface TrendingIdea {
   title: string;
@@ -8,17 +8,12 @@ export interface TrendingIdea {
 
 @Injectable()
 export class TrendingService {
-  constructor(private geminiService: GeminiService) {}
+  private readonly logger = new Logger(TrendingService.name);
+
+  constructor(private openAiService: OpenAiService) {}
 
   async getTrendingIdeas(): Promise<TrendingIdea[]> {
     const prompt = `Generate 5 current trending business ideas that are popular right now in 2025. 
-    Focus on:
-    - AI and technology trends
-    - Sustainability and green business
-    - Remote work solutions
-    - Health and wellness
-    - E-commerce innovations
-    - Social media and content creation
 
     Return as JSON array with this format:
     [
@@ -34,7 +29,7 @@ export class TrendingService {
     try {
       const messages = [{ role: 'user' as const, content: prompt }];
       const response =
-        await this.geminiService.generateChatCompletion(messages);
+        await this.openAiService.generateChatCompletion(messages);
 
       // Parse the JSON response with better error handling
       let ideas: TrendingIdea[];
@@ -57,9 +52,9 @@ export class TrendingService {
           const parsed = JSON.parse(cleanResponse) as TrendingIdea[];
           ideas = Array.isArray(parsed) ? parsed : [parsed];
         } catch (parseError) {
-          console.error('JSON parsing failed:', parseError);
-          console.error('Raw response:', response);
-          console.error('Cleaned response:', cleanResponse);
+          this.logger.error('JSON parsing failed', parseError as Error);
+          this.logger.error(`Raw response: ${response}`);
+          this.logger.error(`Cleaned response: ${cleanResponse}`);
           throw new Error('Failed to parse AI response as JSON');
         }
       } else {
@@ -82,9 +77,11 @@ export class TrendingService {
 
       return validIdeas;
     } catch (error: any) {
-      console.error('Error generating trending ideas:', error);
+      this.logger.error('Error generating trending ideas', error as Error);
       // Return empty array instead of fallback data to let frontend handle the error
-      throw new Error(`Failed to generate trending ideas: ${error?.message || 'Unknown error'}`);
+      throw new Error(
+        `Failed to generate trending ideas: ${error?.message || 'Unknown error'}`,
+      );
     }
   }
 }

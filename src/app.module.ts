@@ -15,7 +15,6 @@ import { OpenAiModule } from './openai/openai.module';
 import { SeedModule } from './seed/seed.module';
 import { SeedService } from './seed/seed.service';
 import { GenerateModule } from './generate/generate.module';
-import { GeminiModule } from './gemini/gemini.module';
 import { TrendingModule } from './trending/trending.module';
 
 @Module({
@@ -35,7 +34,6 @@ import { TrendingModule } from './trending/trending.module';
     OpenAiModule,
     SeedModule,
     GenerateModule,
-    GeminiModule,
     TrendingModule,
   ],
   controllers: [AppController],

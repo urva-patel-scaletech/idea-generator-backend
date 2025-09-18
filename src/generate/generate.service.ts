@@ -11,7 +11,7 @@ import { Thread } from '../entities/thread.entity';
 import { User } from '../entities/user.entity';
 import { Message } from '../entities/message.entity';
 import { MessageSender } from '../common/enums';
-import { GeminiService } from '../gemini/gemini.service';
+import { OpenAiService } from '../openai/openai.service';
 import { TrendingService } from '../trending/trending.service';
 import {
   GenerateDto,
@@ -32,7 +32,7 @@ export class GenerateService {
     private userRepository: Repository<User>,
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
-    private geminiService: GeminiService,
+    private openAiService: OpenAiService,
     private trendingService: TrendingService,
   ) {}
 
@@ -54,8 +54,8 @@ export class GenerateService {
       userId,
     );
 
-    // Generate content using Gemini
-    const rawGeneratedContent = await this.geminiService.generateByAppType(
+    // Generate content using OpenAI
+    const rawGeneratedContent = await this.openAiService.generateByAppType(
       assistant.appType,
       generateDto.message,
       assistant.promptConfig,
@@ -86,7 +86,6 @@ export class GenerateService {
         createdAt: new Date(),
       },
     });
-    console.log('thread', thread.metadata.generatedContent);
     const savedThread = await this.threadRepository.save(thread);
 
     return {
@@ -123,7 +122,7 @@ export class GenerateService {
       throw new NotFoundException(`Card with ID ${refineDto.cardId} not found`);
     }
 
-    const refinedContent = await this.geminiService.refineContent(
+    const refinedContent = await this.openAiService.refineContent(
       contentToRefine,
       refineDto.aspect,
       thread.assistant.promptConfig,
@@ -309,10 +308,6 @@ export class GenerateService {
     overrides?: any,
     userId?: string,
   ): Promise<any> {
-    console.log('Assistant:', assistant);
-    console.log('User Message:', userMessage);
-    console.log('Overrides:', overrides);
-    console.log('User ID:', userId);
     // Start with default settings from assistant
     const defaultParams = {
       count: assistant.appSettings?.defaultCount || 6,
@@ -334,14 +329,6 @@ export class GenerateService {
       ...inferredParams,
       ...overrides,
     };
-
-    console.log('=== PARAMETER RESOLUTION DEBUG ===');
-    console.log('Default Params:', defaultParams);
-    console.log('User Context:', userContext);
-    console.log('Inferred Params:', inferredParams);
-    console.log('Overrides:', overrides);
-    console.log('Final Resolved Params:', resolvedParams);
-    console.log('=== END DEBUG ===');
 
     return resolvedParams;
   }
@@ -377,22 +364,16 @@ export class GenerateService {
       : title;
   }
 
-
-
   /**
    * Assign unique IDs to each card in the generated content
    */
   private assignCardIds(content: any): any {
-    console.log('Processing content type:', typeof content);
-    console.log('Raw content:', content);
     // If content is a string (JSON), try to parse it first
     if (typeof content === 'string') {
       try {
         const parsed = JSON.parse(content);
-        console.log('Parsed JSON content:', parsed);
         return this.assignCardIds(parsed);
-      } catch (error) {
-        console.error('Failed to parse JSON content:', error);
+      } catch {
         // If parsing fails, wrap the string content in an object with ID
         return {
           id: uuidv4(),
@@ -454,7 +435,7 @@ export class GenerateService {
     }));
 
     // Generate AI response with card context and chat history
-    const aiResponse = await this.geminiService.chatWithCardContext(
+    const aiResponse = await this.openAiService.chatWithCardContext(
       cardContext,
       chatDto.message,
       chatHistory,
@@ -559,5 +540,57 @@ export class GenerateService {
       return content;
     }
     return null;
+  }
+
+  async getUserHistory(userId: string) {
+    try {
+      // Get all threads for the user with their content
+      const threads = await this.threadRepository.find({
+        where: { userId },
+        order: { createdAt: 'DESC' },
+        relations: ['assistant'],
+      });
+
+      // Format the response to include thread details and generated ideas
+      const history = threads.map((thread) => {
+        const metadata = thread.metadata || {};
+        const generatedContent = metadata.generatedContent || [];
+        const refinementHistory = metadata.refinementHistory || [];
+
+        return {
+          threadId: thread.id,
+          title: thread.title,
+          appType: thread.assistant?.name || 'Unknown',
+          createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
+          generatedIdeas: Array.isArray(generatedContent)
+            ? generatedContent
+            : [generatedContent].filter(Boolean),
+          refinements: refinementHistory,
+          totalIdeas: Array.isArray(generatedContent)
+            ? generatedContent.length
+            : generatedContent
+              ? 1
+              : 0,
+          hasRefinements: refinementHistory.length > 0,
+        };
+      });
+
+      return {
+        success: true,
+        data: {
+          totalThreads: threads.length,
+          totalIdeas: history.reduce(
+            (sum, thread) => sum + thread.totalIdeas,
+            0,
+          ),
+          history,
+        },
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to retrieve user history: ${error.message}`,
+      );
+    }
   }
 }

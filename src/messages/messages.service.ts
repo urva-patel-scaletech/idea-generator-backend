@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -9,16 +10,18 @@ import { Message } from '../entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ThreadsService } from '../threads/threads.service';
-import { GeminiService, ChatMessage } from '../gemini/gemini.service';
+import { OpenAiService, ChatMessage } from '../openai/openai.service';
 import { MessageSender } from '../common/enums';
 
 @Injectable()
 export class MessagesService {
+  private readonly logger = new Logger(MessagesService.name);
+
   constructor(
     @InjectRepository(Message)
     private readonly messageRepository: Repository<Message>,
     private readonly threadsService: ThreadsService,
-    private readonly geminiService: GeminiService,
+    private readonly openAiService: OpenAiService,
   ) {}
 
   async create(
@@ -126,7 +129,7 @@ export class MessagesService {
 
     // Generate AI response
     const aiResponse =
-      await this.geminiService.generateChatCompletion(chatMessages);
+      await this.openAiService.generateChatCompletion(chatMessages);
 
     // Save assistant message
     const assistantMessage = await this.create({
@@ -200,7 +203,7 @@ export class MessagesService {
 
     // Generate AI response
     const aiResponse =
-      await this.geminiService.generateChatCompletion(chatMessages);
+      await this.openAiService.generateChatCompletion(chatMessages);
 
     // Save assistant message
     const assistantMessage = await this.createByUser(
@@ -233,11 +236,11 @@ export class MessagesService {
         (msg) => `${msg.sender}: ${msg.content}`,
       );
 
-      const summary = await this.geminiService.generateSummary(messageContents);
+      const summary = await this.openAiService.generateSummary(messageContents);
       await this.threadsService.updateSummary(threadId, summary);
     } catch (error) {
       // Log error but don't fail the main operation
-      console.error('Failed to update thread summary:', error);
+      this.logger.error('Failed to update thread summary', error as Error);
     }
   }
 

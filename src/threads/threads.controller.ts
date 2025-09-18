@@ -6,39 +6,61 @@ import {
   Patch,
   Param,
   Delete,
-  ParseUUIDPipe,
+  UseGuards,
+  Request,
   Query,
+  ParseUUIDPipe,
 } from '@nestjs/common';
-import { UseGuards } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import {
-  ApiTags,
+  ApiBearerAuth,
   ApiOperation,
   ApiBody,
-  ApiBearerAuth,
   ApiQuery,
+  ApiTags,
 } from '@nestjs/swagger';
-import { GetCurrentUser } from '../auth/decorators/current-user.decorator';
-import { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
+import { Request as ExpressRequest } from 'express';
 import { ThreadsService } from './threads.service';
 import { CreateThreadDto } from './dto/create-thread.dto';
 import { UpdateThreadDto } from './dto/update-thread.dto';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import { DeviceService } from '../common/services/device.service';
+import { AnonymousUserService } from '../users/anonymous-user.service';
+
+interface AuthenticatedRequest extends ExpressRequest {
+  user?: {
+    id: string;
+    email?: string;
+  };
+}
 
 @ApiTags('Threads')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(OptionalJwtAuthGuard)
 @ApiBearerAuth()
 @Controller('threads')
 export class ThreadsController {
-  constructor(private readonly threadsService: ThreadsService) {}
+  constructor(
+    private readonly threadsService: ThreadsService,
+    private readonly deviceService: DeviceService,
+    private readonly anonymousUserService: AnonymousUserService,
+  ) {}
+
+  private async getUserId(req: AuthenticatedRequest): Promise<string> {
+    if (req.user?.id) {
+      return req.user.id;
+    } else {
+      const deviceInfo = this.deviceService.extractDeviceInfo(req as ExpressRequest);
+      return await this.anonymousUserService.getOrCreateAnonymousUser(
+        deviceInfo,
+      );
+    }
+  }
 
   @ApiOperation({ summary: 'Create new thread' })
   @ApiBody({ type: CreateThreadDto })
   @Post()
-  create(
-    @GetCurrentUser() user: AuthenticatedUser,
-    @Body() createThreadDto: CreateThreadDto,
-  ) {
-    return this.threadsService.create(createThreadDto, user.id);
+  async create(@Body() createThreadDto: CreateThreadDto, @Request() req: AuthenticatedRequest) {
+    const userId = await this.getUserId(req);
+    return this.threadsService.create(createThreadDto, userId);
   }
 
   @ApiOperation({ summary: 'Get all threads for current user' })
@@ -48,44 +70,39 @@ export class ThreadsController {
     description: 'Filter by assistant ID',
   })
   @Get()
-  findAll(
-    @GetCurrentUser() user: AuthenticatedUser,
-    @Query('assistantId') assistantId?: string,
-  ) {
-    // Always filter by the authenticated user's ID
-    if (assistantId) {
-      return this.threadsService.findByUserAndAssistant(user.id, assistantId);
+  async findAll(@Query() query: any, @Request() req: AuthenticatedRequest) {
+    const userId = await this.getUserId(req);
+    // Always filter by the user's ID (authenticated or anonymous)
+    if (query.assistantId) {
+      return this.threadsService.findByUserAndAssistant(userId, query.assistantId);
     }
-    return this.threadsService.findByUser(user.id);
+    return this.threadsService.findByUser(userId);
   }
 
   @ApiOperation({ summary: 'Get thread by ID' })
   @Get(':id')
-  findOne(
-    @GetCurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return this.threadsService.findOneByUser(id, user.id);
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthenticatedRequest) {
+    const userId = await this.getUserId(req);
+    return this.threadsService.findOneByUser(id, userId);
   }
 
   @ApiOperation({ summary: 'Update thread' })
   @ApiBody({ type: UpdateThreadDto })
   @Patch(':id')
-  update(
-    @GetCurrentUser() user: AuthenticatedUser,
+  async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateThreadDto: UpdateThreadDto,
+    @Request() req: AuthenticatedRequest,
   ) {
+    const userId = await this.getUserId(req);
     // First verify user owns the thread, then update
-    return this.threadsService.updateByUser(id, updateThreadDto, user.id);
+    return this.threadsService.updateByUser(id, updateThreadDto, userId);
   }
 
   @ApiOperation({ summary: 'Delete thread' })
   @Delete(':id')
-  remove(
-    @GetCurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return this.threadsService.removeByUser(id, user.id);
+  async remove(@Param('id', ParseUUIDPipe) id: string, @Request() req: AuthenticatedRequest) {
+    const userId = await this.getUserId(req);
+    return this.threadsService.removeByUser(id, userId);
   }
 }
