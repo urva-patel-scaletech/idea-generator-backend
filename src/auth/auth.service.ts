@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
+import { AnonymousUserService } from '../users/anonymous-user.service';
+import { DeviceService, DeviceInfo } from '../common/services/device.service';
 import * as bcrypt from 'bcryptjs';
 
 export interface JwtPayload {
@@ -14,6 +16,8 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly anonymousUserService: AnonymousUserService,
+    private readonly deviceService: DeviceService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -48,13 +52,54 @@ export class AuthService {
     };
   }
 
-  async register(name: string, email: string, password: string) {
+  async register(
+    name: string,
+    email: string,
+    password: string,
+    deviceInfo?: DeviceInfo,
+  ) {
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    if (deviceInfo) {
+      // Try to convert existing anonymous user
+      const convertedUser =
+        await this.anonymousUserService.convertAnonymousToAuthenticated(
+          deviceInfo,
+          email,
+          hashedPassword,
+          name,
+        );
+
+      if (convertedUser) {
+        return this.login({
+          id: convertedUser.id,
+          email: convertedUser.email!,
+          name: convertedUser.name!,
+        });
+      }
+    }
+
+    // Create new authenticated user
     const user = await this.usersService.create({
       name,
       email,
-      password,
+      password: hashedPassword,
     });
 
-    return this.login(user);
+    return this.login({
+      id: user.id,
+      email: user.email!,
+      name: user.name!,
+    });
+  }
+
+  async registerWithDeviceInfo(
+    name: string,
+    email: string,
+    password: string,
+    req: any,
+  ) {
+    const deviceInfo = this.deviceService.extractDeviceInfo(req);
+    return this.register(name, email, password, deviceInfo);
   }
 }

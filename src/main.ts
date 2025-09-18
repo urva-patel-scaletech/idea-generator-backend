@@ -13,7 +13,8 @@ async function bootstrap() {
     origin: true, // Allow all origins
     // credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type, Authorization, Accept, X-Requested-With',
+    allowedHeaders:
+      'Content-Type, Authorization, Accept, X-Requested-With, X-Device-ID, X-Device-Platform, X-Device-User-Agent',
   });
 
   // Global validation pipe

@@ -1,5 +1,32 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  MinLength,
+  IsOptional,
+  ValidateNested,
+} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+
+class DeviceInfoDto {
+  @ApiProperty({
+    description: 'Device identifier',
+    example: 'web_1726574123456_abc123def',
+  })
+  @IsString()
+  @IsNotEmpty()
+  deviceId: string;
+
+  @ApiProperty({
+    description: 'Platform type',
+    example: 'web',
+    enum: ['web', 'mobile'],
+  })
+  @IsString()
+  @IsNotEmpty()
+  platform: 'web' | 'mobile';
+}
 
 export class RegisterDto {
   @ApiProperty({
@@ -25,4 +52,13 @@ export class RegisterDto {
   @IsString()
   @MinLength(6)
   password: string;
+
+  @ApiPropertyOptional({
+    description: 'Device information for anonymous user conversion',
+    type: DeviceInfoDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DeviceInfoDto)
+  deviceInfo?: DeviceInfoDto;
 }

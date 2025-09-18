@@ -83,21 +83,8 @@ export class TrendingService {
       return validIdeas;
     } catch (error: any) {
       console.error('Error generating trending ideas:', error);
-      // Fallback trending ideas
-      return [
-        {
-          title: 'AI-Powered Personal Assistant',
-          description: 'Smart assistant for daily task management',
-        },
-        {
-          title: 'Sustainable Packaging Solutions',
-          description: 'Eco-friendly packaging for e-commerce',
-        },
-        {
-          title: 'Remote Team Collaboration Platform',
-          description: 'Virtual workspace for distributed teams',
-        },
-      ];
+      // Return empty array instead of fallback data to let frontend handle the error
+      throw new Error(`Failed to generate trending ideas: ${error?.message || 'Unknown error'}`);
     }
   }
 }
